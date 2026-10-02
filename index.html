@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bumper | Get on the list</title>
+<meta name="description" content="Bumper helps you meet people in real life. Get on the list for your city.">
+<style>
+  :root {
+    --bg: #faf7f4;
+    --surface: #ffffff;
+    --text: #1d1a1a;
+    --muted: #6b6464;
+    --green: #2f7d5b;
+    --border: #e4ddd8;
+    --error: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Segoe UI", Roboto, sans-serif;
+  }
+  .card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 32px 24px;
+  }
+  h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.15; }
+  p.sub { margin: 0 0 24px; color: var(--muted); font-size: 16px; line-height: 1.4; }
+  label { display: block; margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+  input[type="text"], input[type="email"], input[type="tel"] {
+    width: 100%;
+    padding: 14px;
+    margin-bottom: 16px;
+    font-size: 16px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  input:focus { outline: 2px solid var(--green); outline-offset: 1px; }
+  button {
+    width: 100%;
+    padding: 15px;
+    font-size: 17px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--green);
+    border: 0;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: default; }
+  .msg { margin-top: 14px; font-size: 14px; min-height: 18px; }
+  .msg.error { color: var(--error); }
+  .done { display: none; text-align: center; }
+  .done h1 { font-size: 26px; }
+  .hp { position: absolute; left: -9999px; }
+</style>
+</head>
+<body>
+<main class="card">
+  <form id="form" novalidate>
+    <h1>Meet people in real life.</h1>
+    <p class="sub">Bumper is for the moment you're actually out. Tell us where you are and we'll let you know when it's live near you.</p>
+
+    <label for="name">First name</label>
+    <input id="name" name="name" type="text" autocomplete="given-name" required maxlength="80">
+
+    <label for="phone">Phone number</label>
+    <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" required maxlength="20" placeholder="(555) 123-4567">
+
+    <label for="email">Email <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+    <input id="email" name="email" type="email" autocomplete="email" maxlength="200">
+
+    <label for="city">City</label>
+    <input id="city" name="city" type="text" autocomplete="address-level2" required maxlength="100" placeholder="e.g. New York">
+
+    <!-- honeypot: real people never see or fill this -->
+    <input class="hp" id="website" name="website" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+
+    <button id="submit" type="submit">Get on the list</button>
+    <p class="sub" style="margin:12px 0 0;font-size:13px">We'll only text you when Bumper is live in your city.</p>
+    <div id="msg" class="msg" role="status" aria-live="polite"></div>
+  </form>
+
+  <section id="done" class="done" aria-live="polite">
+    <h1>You're on the list.</h1>
+    <p class="sub">We'll email you when Bumper is live in your city.</p>
+  </section>
+</main>
+
+<script>
+  // These two values are safe to be public. Row Level Security on the table
+  // is what protects the data: the public can only insert, never read.
+  const SUPABASE_URL = "https://wovzjjmwkvrxfrypaicp.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_kfp68cQZIMkRCIuG0p3lCQ_o3zRgC0B";
+
+  const form = document.getElementById("form");
+  const msg = document.getElementById("msg");
+  const btn = document.getElementById("submit");
+
+  // Tracks where people came from. Link TikTok as ?src=tiktok and Threads as ?src=threads
+  const src = (new URLSearchParams(location.search).get("src") || "direct").slice(0, 40);
+
+  function show(text, isError) {
+    msg.textContent = text;
+    msg.className = "msg" + (isError ? " error" : "");
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    show("");
+
+    // Bots fill the hidden field. Pretend it worked and stop.
+    if (document.getElementById("website").value) {
+      form.style.display = "none";
+      document.getElementById("done").style.display = "block";
+      return;
+    }
+
+    const name = form.name.value.trim();
+    const email = form.email.value.trim().toLowerCase();
+    const city = form.city.value.trim();
+
+    // Store phone as digits with country code, e.g. 15551234567.
+    // That is the same format your app's login uses, so the two can be matched exactly.
+    let phone = form.phone.value.replace(/\D/g, "");
+    if (phone.length === 10) phone = "1" + phone;           // assume US if no country code
+    if (phone.length < 11 || phone.length > 15) { show("That phone number doesn't look right.", true); return; }
+
+    if (!name || !city) { show("Please fill in your name and city.", true); return; }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { show("That email doesn't look right.", true); return; }
+
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+
+    try {
+      const res = await fetch(SUPABASE_URL + "/rest/v1/waitlist_signups", {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": "Bearer " + SUPABASE_KEY,
+          "Content-Type": "application/json",
+          "Prefer": "return=minimal"
+        },
+        body: JSON.stringify({ name, phone, email: email || null, city, source: src })
+      });
+
+      // 409 means this phone number is already on the list. Treat that as success.
+      if (res.ok || res.status === 409) {
+        form.style.display = "none";
+        document.getElementById("done").style.display = "block";
+      } else {
+        throw new Error("status " + res.status);
+      }
+    } catch (err) {
+      show("Something went wrong. Please try again.", true);
+      btn.disabled = false;
+      btn.textContent = "Get on the list";
+    }
+  });
+</script>
+</body>
+</html>
